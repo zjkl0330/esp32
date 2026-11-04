@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    // Manager.ts 里对 protocol/security 用了带 .ts 的显式后缀，
+    // 这样 Node 的 strip-only 运行时能直接 import 它做单测
+    // （见 test/manager-evict.mjs）。esbuild 打包同样接受带后缀的 import。
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src/**/*.ts"]
+}

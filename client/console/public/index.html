@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<title>WOL + 隧道 控制台</title>
+<!--__CFG__-->
+<style>
+:root{
+  --bg:#f3f4f6; --card:#fff; --line:#eceef1; --ink:#1f2328; --muted:#8a9099;
+  --blue:#2563eb; --red:#dc2626; --green:#16a34a; --amber:#d97706; --grey:#9ca3af;
+  --radius:14px; --shadow:0 1px 3px rgba(16,24,40,.07),0 1px 2px rgba(16,24,40,.04);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  background:var(--bg); color:var(--ink); font-size:16px; line-height:1.5;
+  padding:16px 14px calc(28px + env(safe-area-inset-bottom));
+}
+.wrap{max-width:720px;margin:0 auto}
+.head{display:flex;align-items:baseline;justify-content:space-between;margin:2px 2px 14px}
+.head h1{font-size:20px;margin:0;font-weight:800;letter-spacing:.2px}
+.head .sub{font-size:12px;color:var(--muted)}
+.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);
+  padding:16px;margin-bottom:14px}
+.card h2{font-size:14px;margin:0 0 12px;color:var(--muted);font-weight:700;letter-spacing:.4px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;
+  padding:9px 0;border-bottom:1px solid var(--line);font-size:15px}
+.row:last-child{border-bottom:0}
+.row .k{color:var(--muted);flex:0 0 auto}
+.row .v{font-weight:600;text-align:right;word-break:break-all}
+.v.mono{font-family:ui-monospace,Consolas,monospace;font-size:13px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle;background:var(--grey)}
+.dot.on{background:var(--green);box-shadow:0 0 0 3px rgba(22,163,74,.15)}
+.dot.off{background:var(--red);box-shadow:0 0 0 3px rgba(220,38,38,.12)}
+.green{color:var(--green)} .red{color:var(--red)} .muted{color:var(--muted)}
+button{
+  font:inherit;font-weight:700;border:0;border-radius:12px;color:#fff;cursor:pointer;
+  min-height:48px;padding:0 16px;width:100%;background:var(--blue);
+  transition:filter .15s,opacity .15s;
+}
+button:active{filter:brightness(.93)}
+button:disabled{background:#cfd4da;color:#fff;cursor:not-allowed}
+button.ghost{background:#eef1f5;color:#374151}
+button.danger{background:var(--red)}
+button.big{font-size:17px;min-height:54px}
+button.sm{min-height:40px;font-size:14px;padding:0 12px;width:auto}
+.btns{display:flex;gap:8px;margin-top:4px}
+input,select{font:inherit;width:100%;padding:12px;border:1px solid #d9dde3;border-radius:10px;
+  background:#fff;min-height:48px}
+input:focus,select:focus{outline:2px solid rgba(37,99,235,.35);border-color:var(--blue)}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 5px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.msg{font-size:14px;margin-top:10px;min-height:20px;color:var(--muted);word-break:break-all}
+.msg.ok{color:var(--green)} .msg.err{color:var(--red)}
+.t-list{display:flex;flex-direction:column;gap:10px}
+.t-item{border:1px solid var(--line);border-radius:12px;padding:12px;background:#fbfcfd}
+.t-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.t-name{font-weight:700;font-size:15px}
+.tag{font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.tag.run{background:#e7f7ee;color:var(--green)}
+.tag.stop{background:#f1f2f4;color:var(--muted)}
+.t-map{font-family:ui-monospace,Consolas,monospace;font-size:13px;color:#374151;margin:6px 0}
+.t-stat{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin-bottom:8px}
+.t-stat b{color:var(--ink);font-weight:600}
+.t-actions{display:flex;gap:8px}
+details.card summary{cursor:pointer;font-weight:700;font-size:15px;list-style:none;outline:none}
+details.card summary::-webkit-details-marker{display:none}
+details.card summary::before{content:"⚙ ";color:var(--muted)}
+details.card[open] summary{margin-bottom:12px}
+.hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5}
+.banner{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:12px;
+  padding:10px 12px;font-size:13px;margin-bottom:14px}
+.banner a{color:#9a3412;font-weight:700}
+.empty{color:var(--muted);font-size:14px;text-align:center;padding:14px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <h1>家 · 控制台</h1>
+    <span class="sub" id="modeTag"></span>
+  </div>
+
+  <div class="banner" id="setupBanner" style="display:none"></div>
+
+  <!-- 状态总览 -->
+  <div class="card">
+    <h2>状态总览</h2>
+    <div class="row"><span class="k">ESP32</span><span class="v" id="esp"><span class="dot" id="espDot"></span>查询中…</span></div>
+    <div class="row"><span class="k">隧道名</span><span class="v mono" id="tunnelName">-</span></div>
+    <div class="row"><span class="k">公网地址</span><span class="v mono" id="workerBase">-</span></div>
+    <div class="row"><span class="k">在线用户</span><span class="v" id="users">-</span></div>
+    <div class="row"><span class="k">最近刷新</span><span class="v muted" id="lastRefresh">-</span></div>
+  </div>
+
+  <!-- WOL -->
+  <div class="card">
+    <h2>远程唤醒 (Wake-on-LAN)</h2>
+    <button class="big" id="wakeDefault" style="background:var(--red)">一键唤醒（默认 MAC）</button>
+    <label for="mac">唤醒指定设备（MAC）</label>
+    <input id="mac" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" inputmode="text">
+    <div style="margin-top:10px">
+      <button id="wakeMac">发送魔术包</button>
+    </div>
+    <div class="msg" id="wolMsg"></div>
+  </div>
+
+  <!-- 隧道 -->
+  <div class="card">
+    <h2>隧道映射</h2>
+    <div class="t-list" id="tunnelList"><div class="empty">加载中…</div></div>
+  </div>
+
+  <div class="card">
+    <h2>新增映射</h2>
+    <label for="f-name">名称（可留空）</label>
+    <input id="f-name" placeholder="远程桌面" autocomplete="off">
+    <div class="grid2">
+      <div><label for="f-local">本地端口</label><input id="f-local" placeholder="3389" inputmode="numeric" autocomplete="off"></div>
+      <div><label for="f-tport">目标端口</label><input id="f-tport" placeholder="3389" inputmode="numeric" autocomplete="off"></div>
+    </div>
+    <label for="f-host">目标 IP（局域网）</label>
+    <input id="f-host" placeholder="192.168.1.50" inputmode="text" autocomplete="off">
+    <div class="btns"><button id="addTunnel">添加并启动</button></div>
+    <div class="hint">默认只监听 <b>127.0.0.1</b>（仅本机可用，最安全）。若要局域网其它设备也能连，可改 <code>bind</code>（见 API）。</div>
+    <div class="msg" id="addMsg"></div>
+  </div>
+
+  <!-- 设置 -->
+  <details class="card" id="settings">
+    <summary>设置</summary>
+    <div id="workerTokenBox">
+      <label for="s-workerToken">Worker 访问 token（TUNNEL_TOKEN）</label>
+      <input id="s-workerToken" type="password" placeholder="留空则用服务器环境变量" autocomplete="off">
+      <div class="hint">仅存在本机 / 当前会话，不会写入前端文件。</div>
+    </div>
+    <div id="consoleHostBox" style="display:none">
+      <label for="s-consoleHost">控制台地址（局域网 IP:端口）</label>
+      <input id="s-consoleHost" placeholder="192.168.1.50:8787" autocomplete="off">
+    </div>
+    <div id="consoleTokenBox" style="display:none">
+      <label for="s-consoleToken">控制台 token（CONSOLE_TOKEN）</label>
+      <input id="s-consoleToken" type="password" autocomplete="off">
+    </div>
+    <label for="s-refresh">自动刷新间隔（秒）</label>
+    <input id="s-refresh" inputmode="numeric" autocomplete="off">
+    <div class="btns"><button id="saveSettings">保存设置</button></div>
+    <div class="msg" id="setMsg"></div>
+  </details>
+
+</div>
+
+<script>
+"use strict";
+(function () {
+  // ===== 运行时配置 =====
+  const CFG = Object.assign({
+    mode: 'http',            // 'http' = 同源 fetch；'remote' = 浏览器帧隧道
+    workerBase: '', tunnel: 'wol', consoleHost: '',
+    authRequired: false, hasWorkerToken: false,
+  }, window.__CFG__ || {});
+  const REMOTE = CFG.mode === 'remote';
+  const LSKEY = 'wol-console';
+
+  // 本地持久化（token 只留在浏览器/本机）
+  let ST = {};
+  try { ST = JSON.parse(localStorage.getItem(LSKEY) || '{}'); } catch {}
+  const rt = {
+    workerToken: ST.workerToken || '',
+    consoleToken: ST.consoleToken || '',
+    consoleHost: ST.consoleHost || CFG.consoleHost || '',
+    refreshSec: Number(ST.refreshSec) || (REMOTE ? 20 : 5),
+  };
+  function persist() {
+    try { localStorage.setItem(LSKEY, JSON.stringify(rt)); } catch {}
+  }
+
+  const $ = (id) => document.getElementById(id);
+  const fmtB = (n) => {
+    n = Number(n) || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1073741824) return (n / 1048576).toFixed(2) + ' MB';
+    return (n / 1073741824).toFixed(2) + ' GB';
+  };
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // ===== 传输层：http（同源 fetch） vs remote（浏览器帧隧道）=====
+  async function httpRequest(method, path, body) {
+    const headers = {};
+    if (rt.consoleToken) headers['Authorization'] = 'Bearer ' + rt.consoleToken;
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    let res;
+    try {
+      res = await fetch(path, {
+        method, headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (e) {
+      return { status: 0, ok: false, data: null, error: e.message };
+    }
+    const text = await res.text();
+    let data; try { data = JSON.parse(text); } catch { data = text; }
+    return { status: res.status, ok: res.ok, data };
+  }
+
+  // --- 帧协议（与 worker/src/protocol.ts 字节级一致）---
+  const FT = { OPEN: 1, OPEN_OK: 2, DATA: 3, CLOSE: 4, WOL: 5 };
+  function encOpen(ch, ip, port) {
+    const b = new Uint8Array(8);
+    b[0] = FT.OPEN; b[1] = ch & 255;
+    const p = ip.split('.').map(Number);
+    b.set(p, 2);
+    b[6] = (port >> 8) & 255; b[7] = port & 255;
+    return b;
+  }
+  function encData(ch, bytes) {
+    const b = new Uint8Array(2 + bytes.length);
+    b[0] = FT.DATA; b[1] = ch & 255; b.set(bytes, 2);
+    return b;
+  }
+  function buildHttp(method, path, body) {
+    const lines = [`${method} ${path} HTTP/1.1`, 'Host: console'];
+    if (rt.consoleToken) lines.push('Authorization: Bearer ' + rt.consoleToken);
+    let payload = '';
+    if (body !== undefined) {
+      payload = JSON.stringify(body);
+      lines.push('Content-Type: application/json');
+      lines.push('Content-Length: ' + new TextEncoder().encode(payload).length);
+    }
+    lines.push('Connection: close');
+    return lines.join('\r\n') + '\r\n\r\n' + payload;
+  }
+  function parseHttp(chunks) {
+    let total = 0; for (const c of chunks) total += c.length;
+    const all = new Uint8Array(total);
+    let off = 0; for (const c of chunks) { all.set(c, off); off += c.length; }
+    const text = new TextDecoder('utf-8').decode(all);
+    const i = text.indexOf('\r\n\r\n');
+    const head = i >= 0 ? text.slice(0, i) : text;
+    const bodyText = i >= 0 ? text.slice(i + 4) : '';
+    const mm = head.match(/^HTTP\/\d\.\d (\d{3})/);
+    const status = mm ? Number(mm[1]) : 0;
+    let data; try { data = JSON.parse(bodyText); } catch { data = bodyText; }
+    return { status, ok: status >= 200 && status < 300, data };
+  }
+
+  function frameRequest(method, path, body) {
+    return new Promise((resolve) => {
+      if (!rt.consoleHost) return resolve({ status: 0, ok: false, data: null, error: '未设置控制台地址' });
+      const hostPort = rt.consoleHost.split(':');
+      const ip = hostPort[0];
+      const port = Number(hostPort[1] || 8787);
+      const wsBase = CFG.workerBase.replace(/^http/i, 'ws').replace(/\/+$/, '');
+      const ch = 1 + Math.floor(Math.random() * 254);
+      const url = `${wsBase}/ws/${encodeURIComponent(CFG.tunnel)}/user?token=${encodeURIComponent(rt.workerToken)}`;
+
+      let ws;
+      try { ws = new WebSocket(url); } catch (e) { return resolve({ status: 0, ok: false, data: null, error: e.message }); }
+      ws.binaryType = 'arraybuffer';
+
+      let established = false, finished = false;
+      const chunks = [];
+      const timer = setTimeout(() => done({ status: 0, ok: false, data: null, error: '请求超时（隧道无响应）' }), 20000);
+
+      function done(result) {
+        if (finished) return; finished = true;
+        clearTimeout(timer);
+        try { ws.close(); } catch {}
+        resolve(result);
+      }
+      ws.onopen = () => ws.send(encOpen(ch, ip, port));
+      ws.onmessage = (ev) => {
+        const b = new Uint8Array(ev.data);
+        if (!b.length) return;
+        if (b[0] === FT.OPEN_OK) {
+          established = true;
+          ws.send(encData(ch, new TextEncoder().encode(buildHttp(method, path, body))));
+        } else if (b[0] === FT.DATA) {
+          chunks.push(b.slice(2));
+        } else if (b[0] === FT.CLOSE) {
+          try { done(parseHttp(chunks)); } catch (e) { done({ status: 0, ok: false, error: e.message }); }
+        }
+      };
+      ws.onclose = () => {
+        if (established) { try { done(parseHttp(chunks)); } catch (e) { done({ status: 0, ok: false, error: e.message }); } }
+        else done({ status: 0, ok: false, data: null, error: '隧道未建立（ESP32 离线 / token 错误？）' });
+      };
+      ws.onerror = () => done({ status: 0, ok: false, data: null, error: 'WebSocket 连接失败' });
+    });
+  }
+
+  const api = (method, path, body) => REMOTE ? frameRequest(method, path, body) : httpRequest(method, path, body);
+
+  // ===== 业务 =====
+  let refreshing = false;
+  async function refreshStatus() {
+    const r = await api('GET', '/api/status');
+    const on = !!(r.data && typeof r.data === 'object' && r.data.esp32);
+    const known = r.ok && r.data && typeof r.data === 'object' && 'esp32' in r.data;
+    const espEl = $('esp');
+    if (known) {
+      espEl.innerHTML = `<span class="dot ${on ? 'on' : 'off'}"></span>` + (on ? '在线' : '离线');
+      espEl.className = 'v ' + (on ? 'green' : 'red');
+      $('users').textContent = r.data.users ?? '-';
+      $('wakeDefault').disabled = !on;
+    } else {
+      espEl.innerHTML = '<span class="dot off"></span>未知';
+      espEl.className = 'v muted';
+      $('users').textContent = '-';
+    }
+    $('lastRefresh').textContent = new Date().toLocaleTimeString();
+  }
+
+  async function refreshTunnels() {
+    const r = await api('GET', '/api/tunnels');
+    const box = $('tunnelList');
+    const list = (r.data && r.data.tunnels) || [];
+    if (!list.length) { box.innerHTML = '<div class="empty">还没有映射，下面添加一个。</div>'; return; }
+    box.innerHTML = list.map((t) => `
+      <div class="t-item">
+        <div class="t-top">
+          <span class="t-name">${esc(t.name)}</span>
+          <span class="tag ${t.running ? 'run' : 'stop'}">${t.running ? '运行中' : '已停止'}</span>
+        </div>
+        <div class="t-map">127.0.0.1:${t.localPort} &nbsp;→&nbsp; ${esc(t.targetHost)}:${t.targetPort}</div>
+        <div class="t-stat">
+          <span>连接 <b>${t.connCount}</b></span>
+          <span>累计 <b>${t.totalConns}</b></span>
+          <span>↑ <b>${fmtB(t.bytesUp)}</b></span>
+          <span>↓ <b>${fmtB(t.bytesDown)}</b></span>
+        </div>
+        ${t.lastError ? `<div class="msg err" style="margin:0 0 8px">${esc(t.lastError)}</div>` : ''}
+        <div class="t-actions">
+          ${t.running
+            ? `<button class="sm ghost" data-act="stop" data-id="${t.id}">停止</button>`
+            : `<button class="sm" data-act="start" data-id="${t.id}">启动</button>`}
+          <button class="sm danger" data-act="del" data-id="${t.id}">删除</button>
+        </div>
+      </div>`).join('');
+  }
+
+  async function refreshAll() {
+    if (refreshing) return;
+    refreshing = true;
+    try { await Promise.all([refreshStatus(), refreshTunnels()]); }
+    finally { refreshing = false; }
+  }
+
+  async function doWol(mac) {
+    const el = $('wolMsg');
+    el.className = 'msg'; el.textContent = '发送中…';
+    const r = await api('POST', '/api/wol', mac ? { mac } : {});
+    const d = r.data || {};
+    if (d.ok) { el.className = 'msg ok'; el.textContent = '✓ ' + (d.message || '已发送'); }
+    else { el.className = 'msg err'; el.textContent = '✗ ' + (d.message || d.error || ('HTTP ' + r.status)); }
+    refreshStatus();
+  }
+
+  async function addTunnel() {
+    const el = $('addMsg'); el.className = 'msg'; el.textContent = '';
+    const body = {
+      name: $('f-name').value.trim(),
+      localPort: Number($('f-local').value),
+      targetPort: Number($('f-tport').value),
+      targetHost: $('f-host').value.trim(),
+      start: true,
+    };
+    const r = await api('POST', '/api/tunnels', body);
+    const d = r.data || {};
+    if (r.ok && d.ok) {
+      el.className = 'msg ok'; el.textContent = '✓ 已添加并启动';
+      $('f-name').value = $('f-local').value = $('f-tport').value = $('f-host').value = '';
+      refreshTunnels();
+    } else {
+      el.className = 'msg err'; el.textContent = '✗ ' + (d.error || ('HTTP ' + r.status));
+    }
+  }
+
+  function bindTunnelActions() {
+    $('tunnelList').addEventListener('click', async (e) => {
+      const btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      const { act, id } = btn.dataset;
+      btn.disabled = true;
+      if (act === 'del') {
+        if (!confirm('删除这个映射？')) { btn.disabled = false; return; }
+        await api('DELETE', '/api/tunnels/' + encodeURIComponent(id));
+      } else {
+        await api('POST', '/api/tunnels/' + encodeURIComponent(id) + '/' + act);
+      }
+      refreshTunnels();
+    });
+  }
+
+  // ===== 设置 =====
+  function loadSettings() {
+    $('s-workerToken').value = rt.workerToken;
+    $('s-consoleToken').value = rt.consoleToken;
+    $('s-consoleHost').value = rt.consoleHost;
+    $('s-refresh').value = String(rt.refreshSec);
+    $('consoleHostBox').style.display = REMOTE ? '' : 'none';
+    $('consoleTokenBox').style.display = CFG.authRequired ? '' : 'none';
+    $('workerTokenBox').style.display = (REMOTE || !CFG.hasWorkerToken) ? '' : 'none';
+  }
+
+  async function saveSettings() {
+    const el = $('setMsg'); el.className = 'msg';
+    rt.workerToken = $('s-workerToken').value.trim();
+    rt.consoleToken = $('s-consoleToken').value.trim();
+    if (REMOTE) rt.consoleHost = $('s-consoleHost').value.trim();
+    rt.refreshSec = Math.max(3, Math.min(120, Number($('s-refresh').value) || 5));
+    persist();
+    // 把 worker token 交给本机服务器（若它自身没有 env token）
+    if (!REMOTE && rt.workerToken) {
+      await api('POST', '/api/session', { workerToken: rt.workerToken });
+    }
+    if (REMOTE && rt.workerToken) {
+      await api('POST', '/api/session', { workerToken: rt.workerToken });
+    }
+    el.className = 'msg ok'; el.textContent = '✓ 已保存';
+    restartTimer();
+    refreshAll();
+  }
+
+  // ===== 定时器 =====
+  let timer = null;
+  function restartTimer() {
+    if (timer) clearInterval(timer);
+    timer = setInterval(refreshAll, Math.max(3, rt.refreshSec) * 1000);
+  }
+
+  // ===== 初始化 =====
+  function init() {
+    $('modeTag').textContent = REMOTE ? '外网模式（隧道）' : '局域网模式';
+    $('tunnelName').textContent = CFG.tunnel;
+    $('workerBase').textContent = CFG.workerBase;
+
+    // 未配置提示
+    const need = [];
+    if (REMOTE && !rt.workerToken) need.push('Worker token');
+    if (REMOTE && !rt.consoleHost) need.push('控制台地址');
+    if (CFG.authRequired && !rt.consoleToken) need.push('控制台 token');
+    if (need.length) {
+      const b = $('setupBanner');
+      b.style.display = '';
+      b.innerHTML = '还差 <b>' + need.join('、') + '</b>：请在下方「设置」里填写后保存。'
+        + (CFG.workerBase ? '' : '（未提供 Worker 地址）');
+      $('settings').open = true;
+    }
+
+    loadSettings();
+    bindTunnelActions();
+
+    $('wakeDefault').onclick = () => doWol('');
+    $('wakeMac').onclick = () => doWol($('mac').value.trim());
+    $('addTunnel').onclick = addTunnel;
+    $('saveSettings').onclick = saveSettings;
+
+    refreshAll();
+    restartTimer();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
+</body>
+</html>

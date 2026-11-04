@@ -1,0 +1,26 @@
+@echo off
+rem ============================================================
+rem  Manual Wake-on-LAN via Cloudflare Worker relay
+rem  Double-click to run.
+rem
+rem  NOTE: this file contains the shared TUNNEL_TOKEN.
+rem        Do not share it or commit it to a public repo.
+rem ============================================================
+setlocal
+set "WORKER=https://tunnel.example.com"
+set "TUNNEL=wol"
+set "TOKEN=YOUR_TUNNEL_TOKEN"
+rem Leave MAC empty to use the ESP32 firmware default MAC (AA:BB:CC:DD:EE:FF)
+set "MAC="
+
+set "URL=%WORKER%/wol/%TUNNEL%"
+if not "%MAC%"=="" set "URL=%URL%/%MAC%"
+if not "%TOKEN%"=="" set "URL=%URL%?token=%TOKEN%"
+
+echo.
+echo Sending magic packet...
+echo %WORKER%/wol/%TUNNEL%    (token hidden)
+echo.
+curl -s -w "\nHTTP %%{http_code}\n" "%URL%"
+echo.
+pause

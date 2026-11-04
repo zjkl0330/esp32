@@ -1,0 +1,57 @@
+# chat2api Worker（M1：Kilo 免费通道 + OpenAI 兼容 SSE）
+#
+# 部署前把 D1 / KV 的占位 id 换成真实 id：
+#   npx wrangler d1 create chat2api
+#   npx wrangler kv namespace create chat2api-models
+#
+# 首次部署必须配三个 secret（fail-closed，没配就拒绝请求）：
+#   npx wrangler secret put ADMIN_TOKEN
+#   npx wrangler secret put CHAT_API_KEYS   # 可选，D1 为空时当种子
+#
+# 自定义域名：不要用 *.workers.dev（国内 DNS 污染）。部署后再绑：
+#   routes = [{ pattern = "chat.example.com", custom_domain = true }]
+
+name = "chat2api"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+KILO_BASE = "https://api.kilo.ai/api/gateway"
+QWEN_BASE = "https://chat.qwen.ai"
+DEEPSEEK_BASE = "https://chat.deepseek.com"
+DOUBAO_BASE = "https://www.doubao.com"
+GLM_BASE = "https://chatglm.cn"
+WEB_CHANNEL_ENABLED = "0"
+OPENCODE_MODE = "off"
+
+# 网页 token 走 secret，不要写进仓库：
+#   npx wrangler secret put QWEN_TOKEN
+#   npx wrangler secret put DEEPSEEK_TOKEN
+#   npx wrangler secret put DOUBAO_SESSIONID
+#   npx wrangler secret put COOKIE_ENC_KEY   # 网页账号池 AES-GCM 密钥，32 字节以上
+#   npx wrangler secret put EXIT_CLIENT_KEY  # exit 面板里给 chat2api 建的 client key
+#   npx wrangler secret put GLM_TOKEN
+# 可选：GLM_SIGN_SECRET（默认用参考实现的 32 位 hex，官网变更时需要覆盖）
+# 可选：DEEPSEEK_SESSION_ID（已有会话 id，省一次创建）
+#
+# 网页出口（Qwen / DeepSeek / 豆包 / GLM）走 service binding，不走 CF 直连：
+# [[services]]
+# binding = "EXIT"
+# service = "esp32-exit"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "chat2api"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "chat2api-models-local"
+
+[observability]
+enabled = true
+
+# M2 再加（exit Worker 部署成功、且 chat 与 exit 在同一个 CF 账号下）：
+# [[services]]
+# binding = "EXIT"
+# service = "esp32-exit"

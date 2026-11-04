@@ -1,0 +1,48 @@
+# wrangler.exit.toml —— 独立的「住宅出口」Worker（exit.example.com）
+#
+# 为什么要单独一个配置文件，而不是改 wrangler.toml：
+#   那个文件对应的是生产中的 v3 隧道（tunnel.example.com），家里 D0WD 板子的
+#   定时唤醒链路跑在上面。改它 = 一次部署就把正在工作的东西换掉。
+#   而且新代码是 fail-closed 鉴权，v3 的老固件不带 token，一部署就全 401。
+#
+#   两个配置文件 → 两个独立 Worker → 两套独立 DO → 互不影响。
+#
+# 部署：
+#   cd F:/esp32/tunnel/worker
+#   ./node_modules/.bin/wrangler deploy --config wrangler.exit.toml
+#
+# 首次部署前必须配三个 secret（否则服务会拒绝请求，这是有意的）：
+#   wrangler secret put TUNNEL_TOKEN --config wrangler.exit.toml
+#   wrangler secret put ADMIN_TOKEN  --config wrangler.exit.toml
+#   wrangler secret put CLIENT_KEYS  --config wrangler.exit.toml
+
+name = "esp32-exit"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# 自定义域名。workers.dev 在国内被 DNS 污染（解析到 Facebook IP），必须用自己的域名。
+routes = [{ pattern = "exit.example.com", custom_domain = true }]
+
+[durable_objects]
+bindings = [
+  { name = "Relay", class_name = "Relay" },
+  { name = "Manager", class_name = "Manager" },
+]
+
+# 固件分发（OTA 用）。设备只读；写入靠 F:/esp32/tunnel/fw-publish.mjs。
+# 没配这个绑定时 /fw/* 返回 503 no_fw_storage，出口抓取功能不受影响。
+[[kv_namespaces]]
+binding = "FW_KV"
+id = "YOUR_KV_NAMESPACE_ID"
+
+# 新 Worker 的 DO 存储是独立的，迁移 tag 从 v1 重新开始
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Relay"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Manager"]
+
+[observability]
+enabled = true

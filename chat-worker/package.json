@@ -1,0 +1,26 @@
+{
+  "name": "chat2api-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "live": "npm run build && node test/live-kilo.mjs",
+    "live:qwen": "npm run build && node test/live-qwen.mjs",
+    "live:deepseek": "npm run build && node test/live-deepseek.mjs",
+    "live:doubao": "npm run build && node test/live-doubao.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "@types/js-md5": "^0.8.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^3.90.0"
+  },
+  "dependencies": {
+    "js-md5": "^0.9.2"
+  }
+}

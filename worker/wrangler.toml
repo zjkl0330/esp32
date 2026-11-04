@@ -1,0 +1,47 @@
+name = "esp32-wol-tunnel"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# ⚠️ 这个是 v3 生产隧道（tunnel.example.com）的历史配置，**Worker 已于 2026-10-25 删除**。
+#
+#    删除原因：D0WD 板子不再常开，唤醒链路没有使用场景；用户决定收掉。
+#    线上运行时的最后一个版本已归档到：tunnel/archive/v3-esp32-wol-tunnel.deployed.js
+#    （是编译后的 bundle，恢复时可用 `wrangler deploy` 直接发回去）
+#
+#    src/index.ts 现在是 v2「住宅出口」的代码，做了 fail-closed 鉴权：
+#    没配 TUNNEL_TOKEN 就全部拒绝，且设备连接必须带 token。
+#    **不要用这个文件部署** —— 要给 v2 出口部署请用 `--config wrangler.exit.toml`
+#    （独立 Worker esp32-exit，域名 exit.example.com）。
+
+
+# 自定义域名：workers.dev 在国内被 DNS 污染（解析到 Facebook IP），
+# ESP32 连不上，必须走自己的域名。
+routes = [
+  { pattern = "tunnel.example.com", custom_domain = true }
+]
+
+# Durable Object：
+#   Relay   —— 数据面，按 tunnel 名分实例，负责字节转发
+#   Manager —— 控制面，全局单实例，负责节点表 / 工具调用 / 面板快照
+[durable_objects]
+bindings = [
+  { name = "Relay", class_name = "Relay" },
+  { name = "Manager", class_name = "Manager" },
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Relay"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Manager"]
+
+# 可选：共享 token。填了就要求 ESP32（Authorization: Bearer）、
+# 用户客户端与 /wol 接口都带同一个 token。不填 = 不鉴权。
+# 它同时是 Relay /_call 内部路由的密钥，生产环境必须配。
+# 建议用 secret 方式注入，别写进文件：
+#   npx wrangler secret put TUNNEL_TOKEN
+#   npx wrangler secret put ADMIN_TOKEN     # 面板口令
+# [vars]
+# TUNNEL_TOKEN = ""
