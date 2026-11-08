@@ -295,6 +295,8 @@ export interface DoubaoChatOptions {
   sessionId: string;
   chat: ChatRequest;
   fetchImpl: typeof fetch;
+  /** 登录阶段保存的完整 Cookie；优先于 sessionid 拼接 */
+  cookie?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -337,7 +339,7 @@ export async function requestDoubaoChat(options: DoubaoChatOptions): Promise<Res
           'sec-fetch-dest': 'empty',
           'sec-fetch-mode': 'cors',
           'sec-fetch-site': 'same-origin',
-          cookie: `sessionid=${sessionId}; sessionid_ss=${sessionId}`,
+          cookie: options.cookie || `sessionid=${sessionId}; sessionid_ss=${sessionId}`,
           'x-flow-trace': `04-${crypto.randomUUID()}-${randomHex(8)}-01`,
           'agw-js-conv': 'str, str',
         },

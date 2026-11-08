@@ -21,7 +21,10 @@ QWEN_BASE = "https://chat.qwen.ai"
 DEEPSEEK_BASE = "https://chat.deepseek.com"
 DOUBAO_BASE = "https://www.doubao.com"
 GLM_BASE = "https://chatglm.cn"
+CHATGPT_BASE = "https://chatgpt.com"
 WEB_CHANNEL_ENABLED = "0"
+# 网页通道必须走 ESP32；没配 EXIT/EXIT_CLIENT_KEY 时返回 503，不退化成 CF 直连
+WEB_EGRESS_REQUIRED = "1"
 OPENCODE_MODE = "off"
 
 # 网页 token 走 secret，不要写进仓库：
@@ -31,6 +34,8 @@ OPENCODE_MODE = "off"
 #   npx wrangler secret put COOKIE_ENC_KEY   # 网页账号池 AES-GCM 密钥，32 字节以上
 #   npx wrangler secret put EXIT_CLIENT_KEY  # exit 面板里给 chat2api 建的 client key
 #   npx wrangler secret put GLM_TOKEN
+#   npx wrangler secret put CHATGPT_ACCESS_TOKEN
+# 可选：CHATGPT_TURNSTILE_SOLVER_URL / CHATGPT_ARKOSE_TOKEN_URL（turnstile/arkose 求解器）
 # 可选：GLM_SIGN_SECRET（默认用参考实现的 32 位 hex，官网变更时需要覆盖）
 # 可选：DEEPSEEK_SESSION_ID（已有会话 id，省一次创建）
 #

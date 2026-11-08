@@ -112,14 +112,87 @@ function makeDeepSeekLoginFetch({ loginError = false } = {}) {
       if (loginError) {
         return json({ data: { biz_code: 40001, biz_msg: 'captcha required' } });
       }
-      return json({ data: { biz_code: 0, biz_data: { send_window_secs: 60 } } });
+      return new Response(
+        JSON.stringify({ data: { biz_code: 0, biz_data: { send_window_secs: 60 } } }),
+        {
+          headers: {
+            'content-type': 'application/json',
+            'set-cookie': 'ds_device=dev1; Path=/',
+          },
+        }
+      );
     }
     if (url.includes('/api/v0/users/login_by_mobile_sms')) {
-      return json({
-        data: { biz_code: 0, biz_data: { user: { token: 'ds-login-token', id: 'u1' } } },
+      return new Response(
+        JSON.stringify({
+          data: { biz_code: 0, biz_data: { user: { token: 'ds-login-token', id: 'u1' } } },
+        }),
+        {
+          headers: {
+            'content-type': 'application/json',
+            'set-cookie': 'ds_session=sess1; Path=/; HttpOnly',
+          },
+        }
+      );
+    }
+    return chat(input, init);
+  };
+}
+
+function makeDoubaoLoginFetch() {
+  const chat = makeDoubaoFetch();
+  return async (input, init) => {
+    const url = String(input);
+    if (url === 'https://accounts.doubao.test/') {
+      return new Response('ok', { headers: { 'set-cookie': 'ttwid=tt1; Path=/' } });
+    }
+    if (url.includes('/passport/web/send_code/')) {
+      return new Response(JSON.stringify({ message: 'success', data: {} }), {
+        headers: {
+          'content-type': 'application/json',
+          'set-cookie': 'passport_csrf=csrf1; Path=/',
+        },
+      });
+    }
+    if (url.includes('/passport/web/sms_login/')) {
+      return new Response(JSON.stringify({ message: 'success', data: {} }), {
+        headers: {
+          'content-type': 'application/json',
+          'set-cookie': 'sessionid=sess1; Path=/; Domain=.doubao.com; HttpOnly',
+        },
       });
     }
     return chat(input, init);
+  };
+}
+
+function makeChatGptFetch({ blocked = false } = {}) {
+  return async (input) => {
+    const url = String(input);
+    if (url === 'https://chatgpt.test/') {
+      return new Response('<html data-build="dpl-test"><script src="/sdk.js"></script></html>', {
+        headers: { 'content-type': 'text/html' },
+      });
+    }
+    if (url.includes('/sentinel/chat-requirements')) {
+      if (blocked) return new Response('cf_chl_opt', { status: 403 });
+      return json({
+        token: 'sentinel-token',
+        proofofwork: { required: false },
+        turnstile: { required: false },
+        arkose: { required: false },
+      });
+    }
+    if (url.includes('/backend-api/conversation')) {
+      const events = [
+        { message: { id: 'm1', author: { role: 'assistant' }, content: { content_type: 'text', parts: ['你'] }, status: 'in_progress' } },
+        { message: { id: 'm1', author: { role: 'assistant' }, content: { content_type: 'text', parts: ['你好'] }, status: 'in_progress' } },
+        { message: { id: 'm1', author: { role: 'assistant' }, content: { content_type: 'text', parts: ['你好'] }, status: 'finished_successfully' } },
+      ];
+      const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n';
+      return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+    }
+    throw new Error(`unexpected ChatGPT url: ${url}`);
   };
 }
 
@@ -551,6 +624,7 @@ test('deepseek sms login stores account and chat uses it', async () => {
   assert.equal(sentBody.provider, 'deepseek');
   assert.match(sentBody.deviceId, /^7\d{18}$/);
   assert.equal(sentBody.sendWindowSecs, 60);
+  assert.equal(sentBody.cookie, 'ds_device=dev1');
 
   const verified = await handler(
     req('/v1/auth/deepseek/sms/verify', {
@@ -560,12 +634,17 @@ test('deepseek sms login stores account and chat uses it', async () => {
         mobile: '13800000000',
         code: '123456',
         deviceId: sentBody.deviceId,
+        cookie: sentBody.cookie,
       },
     })
   );
   assert.equal(verified.status, 200);
   const verifiedBody = await verified.json();
   assert.equal(verifiedBody.account.provider, 'deepseek');
+  const saved = await accounts.getByProvider('deepseek');
+  assert.match(saved.credentials.cookie, /ds_device=dev1/);
+  assert.match(saved.credentials.cookie, /ds_session=sess1/);
+  assert.equal(saved.credentials.token, 'ds-login-token');
 
   const models = await handler(req('/v1/models'));
   const body = await models.json();
@@ -728,6 +807,144 @@ test('glm without token fails closed', async () => {
   );
   assert.equal(res.status, 503);
   assert.equal((await res.json()).error.code, 'web_not_configured');
+});
+
+test('chatgpt models appear when access token is configured', async () => {
+  const { handler } = makeHandler({
+    env: { CHATGPT_ACCESS_TOKEN: 'chatgpt-token', CHATGPT_BASE: 'https://chatgpt.test' },
+  });
+  const res = await handler(req('/v1/models'));
+  const body = await res.json();
+  assert.ok(body.data.some((model) => model.id === 'web/chatgpt/gpt-4o'));
+});
+
+test('chatgpt chat streams sentinel conversation SSE', async () => {
+  const { handler, pending } = makeHandler({
+    env: { CHATGPT_ACCESS_TOKEN: 'chatgpt-token', CHATGPT_BASE: 'https://chatgpt.test' },
+    fetchImpl: makeChatGptFetch(),
+  });
+  const res = await handler(
+    req('/v1/chat/completions', {
+      method: 'POST',
+      body: {
+        model: 'web/chatgpt/gpt-4o',
+        stream: true,
+        messages: [{ role: 'user', content: '你好' }],
+      },
+    })
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('x-chat-channel'), 'chatgpt');
+  const text = await res.text();
+  assert.match(text, /"content":"你"/);
+  assert.match(text, /"content":"好"/);
+  assert.doesNotMatch(text, /"content":"你好"/);
+  assert.match(text, /data: \[DONE\]/);
+  await Promise.all(pending);
+});
+
+test('chatgpt non-stream aggregates content', async () => {
+  const { handler, pending } = makeHandler({
+    env: { CHATGPT_ACCESS_TOKEN: 'chatgpt-token', CHATGPT_BASE: 'https://chatgpt.test' },
+    fetchImpl: makeChatGptFetch(),
+  });
+  const res = await handler(
+    req('/v1/chat/completions', {
+      method: 'POST',
+      body: {
+        model: 'web/chatgpt/gpt-4o',
+        messages: [{ role: 'user', content: '你好' }],
+      },
+    })
+  );
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.choices[0].message.content, '你好');
+  await Promise.all(pending);
+});
+
+test('chatgpt cf_chl_opt is surfaced as provider_blocked', async () => {
+  const { handler } = makeHandler({
+    env: { CHATGPT_ACCESS_TOKEN: 'chatgpt-token', CHATGPT_BASE: 'https://chatgpt.test' },
+    fetchImpl: makeChatGptFetch({ blocked: true }),
+  });
+  const res = await handler(
+    req('/v1/chat/completions', {
+      method: 'POST',
+      body: {
+        model: 'web/chatgpt/gpt-4o',
+        messages: [{ role: 'user', content: '你好' }],
+      },
+    })
+  );
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).error.code, 'provider_blocked');
+});
+
+test('chatgpt without token fails closed', async () => {
+  const { handler } = makeHandler();
+  const res = await handler(
+    req('/v1/chat/completions', {
+      method: 'POST',
+      body: {
+        model: 'web/chatgpt/gpt-4o',
+        messages: [{ role: 'user', content: '你好' }],
+      },
+    })
+  );
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).error.code, 'web_not_configured');
+});
+
+test('doubao sms login stores sessionid and cookie, then chat uses it', async () => {
+  const accounts = new MemoryAccountStore();
+  const { handler, pending } = makeHandler({
+    env: { ADMIN_TOKEN: 'admin-secret', DOUBAO_PASSPORT_BASE: 'https://accounts.doubao.test' },
+    fetchImpl: makeDoubaoLoginFetch(),
+    accounts,
+  });
+
+  const sent = await handler(
+    req('/v1/auth/doubao/sms/send', {
+      method: 'POST',
+      key: 'admin-secret',
+      body: { mobile: '13800000000' },
+    })
+  );
+  assert.equal(sent.status, 200);
+  const sentBody = await sent.json();
+  assert.match(sentBody.cookie, /ttwid=tt1/);
+  assert.match(sentBody.cookie, /passport_csrf=csrf1/);
+
+  const verified = await handler(
+    req('/v1/auth/doubao/sms/verify', {
+      method: 'POST',
+      key: 'admin-secret',
+      body: { mobile: '13800000000', code: '123456', cookie: sentBody.cookie },
+    })
+  );
+  assert.equal(verified.status, 200);
+  const saved = await accounts.getByProvider('doubao');
+  assert.equal(saved.credentials.sessionid, 'sess1');
+  assert.match(saved.credentials.cookie, /sessionid=sess1/);
+
+  const models = await handler(req('/v1/models'));
+  const body = await models.json();
+  assert.ok(body.data.some((model) => model.id === 'web/doubao/doubao'));
+
+  const chat = await handler(
+    req('/v1/chat/completions', {
+      method: 'POST',
+      body: {
+        model: 'web/doubao/doubao',
+        stream: true,
+        messages: [{ role: 'user', content: '你好' }],
+      },
+    })
+  );
+  assert.equal(chat.status, 200);
+  assert.equal(chat.headers.get('x-chat-channel'), 'doubao');
+  await Promise.all(pending);
 });
 
 test('daily call quota is enforced', async () => {

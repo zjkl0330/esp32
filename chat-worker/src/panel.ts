@@ -65,6 +65,7 @@ export function adminPage(): string {
     </div>
     <div>
       <span id="storagePill" class="pill">storage</span>
+      <button class="btn gray" onclick="checkEgress()">检测 ESP32 出口</button>
       <button class="btn gray" onclick="logout()">退出</button>
     </div>
   </div>
@@ -77,6 +78,7 @@ export function adminPage(): string {
       <div class="metric"><div class="n" id="mDay">-</div><div class="l">北京时间日界</div></div>
     </div>
     <div class="muted" id="statusLine">加载中…</div>
+    <div id="egressMsg" class="msg hidden"></div>
   </div>
 
   <div class="tabs">
@@ -104,7 +106,7 @@ export function adminPage(): string {
       <h3 style="margin:0 0 8px">导入网页账号</h3>
       <p class="muted">千问/GLM/DeepSeek 填 <code>{"token":"..."}</code>；豆包填 <code>{"sessionid":"..."}</code>。加密存 D1。</p>
       <div class="row">
-        <select id="aProvider"><option value="qwen">qwen</option><option value="deepseek">deepseek</option><option value="doubao">doubao</option><option value="glm">glm</option></select>
+        <select id="aProvider"><option value="qwen">qwen</option><option value="deepseek">deepseek</option><option value="doubao">doubao</option><option value="glm">glm</option><option value="chatgpt">chatgpt</option></select>
         <input id="aLabel" placeholder="label，例如 qwen-main">
       </div>
       <textarea id="aCreds" placeholder='{"token":"..."} 或 {"sessionid":"..."}'></textarea>
@@ -133,8 +135,24 @@ export function adminPage(): string {
       <div id="loginMsg2" class="msg hidden"></div>
     </div>
     <div class="card" style="margin-top:14px">
+      <h3 style="margin:0 0 8px">豆包短信验证码登录</h3>
+      <p class="muted">走 ByteDance passport：<code>/passport/web/send_code/</code> → <code>/passport/web/sms_login/</code>。登录后保存 sessionid + 完整 Cookie。</p>
+      <div class="row">
+        <input id="dbMobile" placeholder="手机号，例如 13800000000">
+        <input id="dbAid" placeholder="aid，默认 497858">
+        <button class="btn" onclick="sendDoubaoSms()">发送验证码</button>
+      </div>
+      <div class="row">
+        <input id="dbCode" placeholder="短信验证码">
+        <button class="btn" onclick="verifyDoubaoSms()">校验并保存</button>
+      </div>
+      <textarea id="dbTicket" placeholder='可选：verify_ticket（passport 要求 captcha 时填写）'></textarea>
+      <div id="doubaoMsg" class="msg hidden"></div>
+    </div>
+    <div class="card" style="margin-top:14px">
       <h3 style="margin:0 0 8px">千问 / 豆包</h3>
-      <p class="muted">聊天通道已接入；扫码/短信登录接口还在逐家逆向。现在可先在“网页账号”页导入 token / sessionid，登录后立即生效。</p>
+      <p class="muted">千问 qwen.ai 网页端登录方式只有 Google / Apple / email / GitHub，<b>没有手机号</b>；手机号属于 tongyi.aliyun.com 中国版，需要另接 Alibaba passport。</p>
+      <p class="muted">豆包短信已接（accounts.doubao.com）；扫码 get_qrcode/check_qrconnect 还没接。也可以先在“网页账号”页导入 sessionid。</p>
     </div>
   </div>
 </div>
@@ -142,6 +160,8 @@ export function adminPage(): string {
 <script>
 const $ = (id) => document.getElementById(id);
 let token = localStorage.getItem('chat2api_admin') || '';
+let dsCookie = '';
+let dbCookie = '';
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -258,6 +278,37 @@ async function removeAccount(id) {
   catch (e) { show('accountMsg', e.message, false); }
 }
 
+async function sendDoubaoSms() {
+  try {
+    const body = { mobile: $('dbMobile').value.trim() };
+    if ($('dbAid').value.trim()) body.aid = $('dbAid').value.trim();
+    if ($('dbTicket').value.trim()) body.verifyTicket = $('dbTicket').value.trim();
+    const result = await api('/v1/auth/doubao/sms/send', { method: 'POST', body });
+    dbCookie = result.cookie || '';
+    show('doubaoMsg', '验证码已发送：' + (result.message || 'sent'), true);
+  } catch (e) { show('doubaoMsg', e.message, false); }
+}
+async function verifyDoubaoSms() {
+  try {
+    const body = {
+      mobile: $('dbMobile').value.trim(),
+      code: $('dbCode').value.trim(),
+    };
+    if ($('dbAid').value.trim()) body.aid = $('dbAid').value.trim();
+    if (dbCookie) body.cookie = dbCookie;
+    const result = await api('/v1/auth/doubao/sms/verify', { method: 'POST', body });
+    show('doubaoMsg', '登录成功，账号已加密保存：' + result.account.label, true);
+    refresh();
+  } catch (e) { show('doubaoMsg', e.message, false); }
+}
+
+async function checkEgress() {
+  try {
+    const result = await api('/admin/api/egress-check');
+    show('egressMsg', 'ESP32 出口正常：HTTP ' + result.status + '，' + result.ms + 'ms', true);
+  } catch (e) { show('egressMsg', e.message, false); }
+}
+
 async function sendDeepSeekSms() {
   try {
     const body = { mobile: $('dsMobile').value.trim() };
@@ -265,6 +316,7 @@ async function sendDeepSeekSms() {
     if ($('dsCaptcha').value.trim()) body.captcha = JSON.parse($('dsCaptcha').value);
     const result = await api('/v1/auth/deepseek/sms/send', { method: 'POST', body });
     $('dsDevice').value = result.deviceId;
+    dsCookie = result.cookie || '';
     show('loginMsg2', '验证码已发送，deviceId=' + result.deviceId + '，窗口 ' + result.sendWindowSecs + 's', true);
   } catch (e) { show('loginMsg2', e.message, false); }
 }
@@ -276,6 +328,7 @@ async function verifyDeepSeekSms() {
       deviceId: $('dsDevice').value.trim(),
     };
     if ($('dsArea').value.trim()) body.areaCode = $('dsArea').value.trim();
+    if (dsCookie) body.cookie = dsCookie;
     const result = await api('/v1/auth/deepseek/sms/verify', { method: 'POST', body });
     show('loginMsg2', '登录成功，账号已加密保存：' + result.account.label, true);
     refresh();

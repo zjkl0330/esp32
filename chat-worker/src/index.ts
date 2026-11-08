@@ -23,6 +23,12 @@ import {
   loginLabel,
 } from './providers/deepseek-login.js';
 import { doubaoBase, listDoubaoModels, requestDoubaoChat } from './providers/doubao.js';
+import {
+  doubaoLoginLabel,
+  doubaoSendSms,
+  doubaoVerifySms,
+} from './providers/doubao-login.js';
+import { chatGptBase, listChatGptModels, requestChatGptChat } from './providers/chatgpt.js';
 import { glmBase, listGlmModels, requestGlmChat } from './providers/glm.js';
 import { listQwenModels, qwenBase, requestQwenChat } from './providers/qwen.js';
 import { createExitFetch } from './exit-client.js';
@@ -159,7 +165,7 @@ async function getCatalog(deps: Deps): Promise<CatalogResult> {
 
 async function accountCredentials(
   deps: Deps,
-  provider: 'qwen' | 'deepseek' | 'doubao' | 'glm'
+  provider: 'qwen' | 'deepseek' | 'doubao' | 'glm' | 'chatgpt'
 ): Promise<Record<string, string> | null> {
   try {
     return (await deps.accounts.getByProvider(provider))?.credentials ?? null;
@@ -189,6 +195,8 @@ async function handleModels(request: Request, deps: Deps, rid: string): Promise<
   const deepseek = deps.env.DEEPSEEK_TOKEN || providers.has('deepseek') ? listDeepSeekModels() : [];
   const doubao = deps.env.DOUBAO_SESSIONID || providers.has('doubao') ? listDoubaoModels() : [];
   const glm = deps.env.GLM_TOKEN || providers.has('glm') ? listGlmModels() : [];
+  const chatgpt =
+    deps.env.CHATGPT_ACCESS_TOKEN || providers.has('chatgpt') ? listChatGptModels() : [];
 
   return jsonResponse(
     {
@@ -204,6 +212,7 @@ async function handleModels(request: Request, deps: Deps, rid: string): Promise<
         ...deepseek,
         ...doubao,
         ...glm,
+        ...chatgpt,
       ],
     },
     200,
@@ -271,6 +280,27 @@ async function handleChat(request: Request, deps: Deps, rid: string): Promise<Re
       fetchImpl: deps.webFetch,
       signal: request.signal,
       sessionId: deps.env.DEEPSEEK_SESSION_ID || credentials?.sessionId,
+      cookie: credentials?.cookie,
+    });
+  } else if (resolved.channel === 'chatgpt') {
+    const credentials = await accountCredentials(deps, 'chatgpt');
+    const token = deps.env.CHATGPT_ACCESS_TOKEN || credentials?.token;
+    if (!token) {
+      throw new GatewayError(
+        503,
+        'web_not_configured',
+        'CHATGPT_ACCESS_TOKEN is not configured and no chatgpt account is stored',
+        'server_error'
+      );
+    }
+    upstream = await requestChatGptChat({
+      base: chatGptBase(deps.env.CHATGPT_BASE),
+      token,
+      chat,
+      fetchImpl: deps.webFetch,
+      signal: request.signal,
+      turnstileSolverUrl: deps.env.CHATGPT_TURNSTILE_SOLVER_URL,
+      arkoseTokenUrl: deps.env.CHATGPT_ARKOSE_TOKEN_URL,
     });
   } else if (resolved.channel === 'glm') {
     const credentials = await accountCredentials(deps, 'glm');
@@ -305,6 +335,7 @@ async function handleChat(request: Request, deps: Deps, rid: string): Promise<Re
     upstream = await requestDoubaoChat({
       base: doubaoBase(deps.env.DOUBAO_BASE),
       sessionId,
+      cookie: credentials?.cookie,
       chat,
       fetchImpl: deps.webFetch,
       signal: request.signal,
@@ -417,6 +448,7 @@ async function handleAuth(request: Request, deps: Deps, rid: string): Promise<Re
       areaCode: typeof body.areaCode === 'string' ? body.areaCode : '+86',
       region: typeof body.region === 'string' ? body.region : 'CN',
       locale: typeof body.locale === 'string' ? body.locale : 'zh_CN',
+      cookie: typeof body.cookie === 'string' ? body.cookie : undefined,
       fetchImpl: deps.webFetch,
     });
     const label =
@@ -428,6 +460,7 @@ async function handleAuth(request: Request, deps: Deps, rid: string): Promise<Re
       account = await deps.accounts.add('deepseek', label, {
         token: result.token,
         ...(result.userId ? { userId: result.userId } : {}),
+        ...(result.cookie ? { cookie: result.cookie } : {}),
       });
     } catch {
       throw new GatewayError(
@@ -439,6 +472,77 @@ async function handleAuth(request: Request, deps: Deps, rid: string): Promise<Re
     }
     return jsonResponse(
       { ok: true, provider: 'deepseek', method: 'sms', account },
+      200,
+      { 'x-request-id': rid }
+    );
+  }
+
+  if (path === '/v1/auth/doubao/sms/send' && request.method === 'POST') {
+    const raw = await readJson(request, 65_536);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new GatewayError(400, 'invalid_request', 'body must be a JSON object', 'invalid_request_error');
+    }
+    const body = raw as Record<string, unknown>;
+    const mobile = typeof body.mobile === 'string' ? body.mobile.trim() : '';
+    if (!mobile) {
+      throw new GatewayError(400, 'invalid_request', 'mobile is required', 'invalid_request_error', 'mobile');
+    }
+    const result = await doubaoSendSms({
+      mobile,
+      aid: typeof body.aid === 'string' ? body.aid : deps.env.DOUBAO_AID,
+      service: typeof body.service === 'string' ? body.service : deps.env.DOUBAO_SERVICE,
+      verifyTicket: typeof body.verifyTicket === 'string' ? body.verifyTicket : undefined,
+      cookie: typeof body.cookie === 'string' ? body.cookie : undefined,
+      passportBase: deps.env.DOUBAO_PASSPORT_BASE,
+      fetchImpl: deps.webFetch,
+    });
+    return jsonResponse(
+      { ok: true, provider: 'doubao', method: 'sms', ...result },
+      200,
+      { 'x-request-id': rid }
+    );
+  }
+
+  if (path === '/v1/auth/doubao/sms/verify' && request.method === 'POST') {
+    const raw = await readJson(request, 65_536);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new GatewayError(400, 'invalid_request', 'body must be a JSON object', 'invalid_request_error');
+    }
+    const body = raw as Record<string, unknown>;
+    const mobile = typeof body.mobile === 'string' ? body.mobile.trim() : '';
+    const code = typeof body.code === 'string' ? body.code.trim() : '';
+    if (!mobile || !code) {
+      throw new GatewayError(400, 'invalid_request', 'mobile and code are required', 'invalid_request_error');
+    }
+    const result = await doubaoVerifySms({
+      mobile,
+      code,
+      aid: typeof body.aid === 'string' ? body.aid : deps.env.DOUBAO_AID,
+      service: typeof body.service === 'string' ? body.service : deps.env.DOUBAO_SERVICE,
+      cookie: typeof body.cookie === 'string' ? body.cookie : undefined,
+      passportBase: deps.env.DOUBAO_PASSPORT_BASE,
+      fetchImpl: deps.webFetch,
+    });
+    const label =
+      typeof body.label === 'string' && body.label.trim() !== ''
+        ? body.label.trim()
+        : doubaoLoginLabel(mobile);
+    let account;
+    try {
+      account = await deps.accounts.add('doubao', label, {
+        sessionid: result.sessionid,
+        cookie: result.cookie,
+      });
+    } catch {
+      throw new GatewayError(
+        503,
+        'web_not_configured',
+        'account store is not configured (COOKIE_ENC_KEY / DB)',
+        'server_error'
+      );
+    }
+    return jsonResponse(
+      { ok: true, provider: 'doubao', method: 'sms', account },
       200,
       { 'x-request-id': rid }
     );
@@ -619,11 +723,11 @@ async function handleAdmin(request: Request, deps: Deps, rid: string): Promise<R
     }
     const body = raw as Record<string, unknown>;
     const provider = typeof body.provider === 'string' ? body.provider : '';
-    if (!['qwen', 'deepseek', 'doubao', 'glm'].includes(provider)) {
+    if (!['qwen', 'deepseek', 'doubao', 'glm', 'chatgpt'].includes(provider)) {
       throw new GatewayError(
         400,
         'bad_provider',
-        'provider must be qwen / deepseek / doubao / glm',
+        'provider must be qwen / deepseek / doubao / glm / chatgpt',
         'invalid_request_error',
         'provider'
       );
@@ -644,7 +748,7 @@ async function handleAdmin(request: Request, deps: Deps, rid: string): Promise<R
     }
     try {
       const account = await deps.accounts.add(
-        provider as 'qwen' | 'deepseek' | 'doubao' | 'glm',
+        provider as 'qwen' | 'deepseek' | 'doubao' | 'glm' | 'chatgpt',
         label,
         credentials
       );
@@ -673,6 +777,34 @@ async function handleAdmin(request: Request, deps: Deps, rid: string): Promise<R
     return jsonResponse({ ok: true, id, removed: true }, 200, { 'x-request-id': rid });
   }
 
+  if (path === '/admin/api/egress-check' && request.method === 'GET') {
+    if (!deps.env.EXIT || !deps.env.EXIT_CLIENT_KEY) {
+      throw new GatewayError(
+        503,
+        'web_egress_not_configured',
+        'EXIT binding and EXIT_CLIENT_KEY are required',
+        'server_error'
+      );
+    }
+    const started = Date.now();
+    try {
+      const response = await deps.webFetch('https://chat.qwen.ai/api/models', { method: 'GET' });
+      const ms = Date.now() - started;
+      return jsonResponse(
+        { ok: response.ok, egress: 'esp32', status: response.status, ms },
+        200,
+        { 'x-request-id': rid }
+      );
+    } catch (error) {
+      throw new GatewayError(
+        502,
+        'egress_check_failed',
+        `ESP32 egress check failed: ${error instanceof Error ? error.message : String(error)}`,
+        'api_error'
+      );
+    }
+  }
+
   if (path === '/admin/api/status' && request.method === 'GET') {
     const keys = await deps.store.listKeys();
     return jsonResponse(
@@ -683,7 +815,12 @@ async function handleAdmin(request: Request, deps: Deps, rid: string): Promise<R
         storage: deps.env.DB ? 'd1' : 'memory',
         kiloBase: kiloBase(deps.env.KILO_BASE),
         webChannel: deps.env.WEB_CHANNEL_ENABLED === '1',
-        egress: deps.env.EXIT && deps.env.EXIT_CLIENT_KEY ? 'esp32' : 'direct',
+        egress:
+          deps.env.EXIT && deps.env.EXIT_CLIENT_KEY
+            ? 'esp32'
+            : deps.env.WEB_EGRESS_REQUIRED === '1'
+              ? 'missing'
+              : 'direct',
         opencode: deps.env.OPENCODE_MODE ?? 'off',
       },
       200,
@@ -750,7 +887,19 @@ export default {
     const webFetch =
       env.EXIT && env.EXIT_CLIENT_KEY
         ? createExitFetch(env.EXIT, env.EXIT_CLIENT_KEY)
-        : direct;
+        : env.WEB_EGRESS_REQUIRED === '1'
+          ? async () =>
+              new Response(
+                JSON.stringify({
+                  error: {
+                    code: 'web_egress_not_configured',
+                    message: 'web channels require esp32-exit; set EXIT binding and EXIT_CLIENT_KEY',
+                    type: 'server_error',
+                  },
+                }),
+                { status: 503, headers: { 'content-type': 'application/json' } }
+              )
+          : direct;
     const handler = createHandler({
       env,
       fetch: direct,

@@ -323,6 +323,8 @@ export interface DeepSeekChatOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   sessionId?: string;
+  /** 登录阶段保存的 Cookie；聊天请求会带上，并在本次请求内继续吸收 Set-Cookie */
+  cookie?: string;
 }
 
 /** DeepSeek 网页端：session → PoW → SSE。 */
@@ -348,6 +350,15 @@ export async function requestDeepSeekChat(options: DeepSeekChatOptions): Promise
   const base = options.base;
   const headers = dsHeaders(base, options.token);
   const jar = new Map<string, string>();
+  if (options.cookie) {
+    for (const pair of options.cookie.split(';')) {
+      const at = pair.indexOf('=');
+      if (at <= 0) continue;
+      const name = pair.slice(0, at).trim();
+      const value = pair.slice(at + 1).trim();
+      if (name) jar.set(name, value);
+    }
+  }
 
   const post = async (
     path: string,

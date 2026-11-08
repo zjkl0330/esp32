@@ -1,7 +1,7 @@
 import type { Env } from '../types.js';
 import { randomHex } from '../util.js';
 
-export type WebProvider = 'qwen' | 'deepseek' | 'doubao' | 'glm';
+export type WebProvider = 'qwen' | 'deepseek' | 'doubao' | 'glm' | 'chatgpt';
 
 export interface WebAccountSummary {
   id: string;

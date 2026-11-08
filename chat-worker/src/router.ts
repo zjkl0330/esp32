@@ -3,7 +3,7 @@ import { publicModelId } from './providers/kilo.js';
 import type { KiloModel } from './types.js';
 
 export interface ResolvedModel {
-  channel: 'kilo' | 'qwen' | 'deepseek' | 'doubao' | 'glm';
+  channel: 'kilo' | 'qwen' | 'deepseek' | 'doubao' | 'glm' | 'chatgpt';
   upstreamModel: string;
   publicModel: string;
 }
@@ -52,6 +52,14 @@ export function resolveModel(model: string, catalog: KiloModel[] | null): Resolv
     return { channel: 'doubao', upstreamModel: upstream, publicModel: value };
   }
 
+  if (value.startsWith('web/chatgpt/')) {
+    const upstream = value.slice('web/chatgpt/'.length).trim();
+    if (upstream === '') {
+      throw new GatewayError(400, 'invalid_request', 'model id after web/chatgpt/ is empty', 'invalid_request_error', 'model');
+    }
+    return { channel: 'chatgpt', upstreamModel: upstream, publicModel: value };
+  }
+
   if (value.startsWith('web/glm/')) {
     const upstream = value.slice('web/glm/'.length).trim();
     if (upstream === '') {
@@ -64,7 +72,7 @@ export function resolveModel(model: string, catalog: KiloModel[] | null): Resolv
     throw new GatewayError(
       404,
       'model_not_found',
-      'this web channel is not enabled yet; currently available: web/qwen/*, web/deepseek/*, web/doubao/*, web/glm/*',
+      'this web channel is not enabled yet; currently available: web/qwen/*, web/deepseek/*, web/doubao/*, web/glm/*, web/chatgpt/*',
       'invalid_request_error',
       'model'
     );

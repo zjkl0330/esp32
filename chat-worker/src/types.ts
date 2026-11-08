@@ -19,16 +19,26 @@ export interface Env {
   /** 豆包网页端 sessionid cookie */
   DOUBAO_SESSIONID?: string;
   DOUBAO_BASE?: string;
+  DOUBAO_AID?: string;
+  DOUBAO_SERVICE?: string;
+  DOUBAO_PASSPORT_BASE?: string;
   /** 网页账号池 AES-256-GCM 密钥；不配则只能用 env 里的 token */
   COOKIE_ENC_KEY?: string;
   /** service binding：esp32-exit */
   EXIT?: Fetcher;
   /** 调 exit /api/fetch 的客户端 key（在 exit 面板里创建） */
   EXIT_CLIENT_KEY?: string;
+  /** "1" 时网页通道必须走 ESP32；没配 EXIT 就返回 503，不静默直连 */
+  WEB_EGRESS_REQUIRED?: string;
   /** 智谱清言网页 access token */
   GLM_TOKEN?: string;
   GLM_BASE?: string;
   GLM_SIGN_SECRET?: string;
+  /** ChatGPT 网页 access token */
+  CHATGPT_ACCESS_TOKEN?: string;
+  CHATGPT_BASE?: string;
+  CHATGPT_TURNSTILE_SOLVER_URL?: string;
+  CHATGPT_ARKOSE_TOKEN_URL?: string;
 }
 
 export interface ApiKeyRecord {
