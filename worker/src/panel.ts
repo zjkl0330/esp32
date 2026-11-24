@@ -328,6 +328,16 @@ footer{margin-top:16px;color:var(--tx3);font-size:11px;display:flex;
   <div class="note" id="keyNote"></div>
 </section>
 
+<section class="card" id="secCard">
+  <div class="card-hd">
+    <h2>面板设置</h2>
+    <span class="hint">改完密码要用新密码重新登录</span>
+  </div>
+  <div class="keybar">
+    <button id="pwBtn" class="mini">修改面板密码</button>
+  </div>
+</section>
+
 <details class="tech" id="tech">
   <summary>技术细节（排障时才需要）</summary>
   <div class="body">
@@ -566,6 +576,7 @@ function renderKeys(d, kl){
       : '';
     var ops = meta
       ? '<div class="ops">' +
+        '<button class="mini ghost" data-edit="' + esc(name) + '">编辑</button>' +
         '<button class="mini ghost" data-copy="' + mi + '">复制</button>' +
         '<button class="mini danger" data-del="' + esc(name) + '">吊销</button>' +
         '</div>'
@@ -826,6 +837,29 @@ el('keyReveal').addEventListener('click', function(){
 el('keys').addEventListener('click', function(e){
   var t = e.target && e.target.closest ? e.target.closest('button') : null;
   if (!t) return;
+  var ed = t.getAttribute('data-edit');
+  if (ed !== null && ed !== false) {
+    var meta = null;
+    (T.keyList || []).forEach(function(x){ if (x.name === ed) meta = x; });
+    var c = prompt('「' + ed + '」每日调用上限（次，0 = 不限）', meta && meta.dayCalls ? meta.dayCalls : 0);
+    if (c === null) return;
+    var b = prompt('每日流量上限（MB，0 = 不限）', meta && meta.dayBytes ? Math.round(meta.dayBytes / 1048576) : 0);
+    if (b === null) return;
+    var body = { name: ed };
+    var cn = parseInt(c, 10);
+    if (cn > 0) body.dayCalls = cn;
+    var bn = parseInt(b, 10);
+    if (bn > 0) body.dayBytes = bn * 1048576;
+    fetch('/admin/api/keys', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ toast(d && d.ok ? '已更新「' + ed + '」' : '更新失败'); pull(); })
+      .catch(function(){ toast('操作失败'); });
+    return;
+  }
   var cp = t.getAttribute('data-copy');
   if (cp !== null && cp !== false) {
     var k = (T.keyList || [])[parseInt(cp, 10)];
@@ -865,6 +899,29 @@ function closeAdd(){
 }
 el('keyAddBtn').addEventListener('click', openAdd);
 el('kaCancel').addEventListener('click', closeAdd);
+
+el('pwBtn').addEventListener('click', function(){
+  var old = prompt('当前面板密码');
+  if (old === null) return;
+  var n1 = prompt('新密码（至少 8 位）');
+  if (n1 === null) return;
+  if (n1.length < 8) { toast('新密码至少 8 位'); return; }
+  var n2 = prompt('再输一次新密码');
+  if (n2 !== n1) { toast('两次输入不一致'); return; }
+  fetch('/admin/api/password', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ old: old, new: n1 })
+  })
+    .then(function(r){ return r.json().then(function(d){ return { s: r.status, d: d }; }); })
+    .then(function(o){
+      if (o.d && o.d.ok) { alert('密码已修改，请用新密码重新登录'); location.href = '/admin'; }
+      else if (o.d && o.d.error === 'bad_old') toast('当前密码不对');
+      else if (o.d && o.d.error === 'weak') toast('新密码太短（至少 8 位）');
+      else toast('修改失败：' + ((o.d && o.d.error) || o.s));
+    })
+    .catch(function(){ toast('请求失败'); });
+});
 
 el('kaCreate').addEventListener('click', function(){
   var name = el('kaName').value.trim();

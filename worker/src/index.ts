@@ -78,6 +78,44 @@ function bearer(request: Request): string {
   return h.startsWith('Bearer ') ? h.slice(7) : '';
 }
 
+// ── 面板密码 ───────────────────────────────────────────────────────────
+// 面板里改过的密码以「盐 + SHA-256」存在 KV（_admin/auth），优先于 ADMIN_TOKEN；
+// 没改过才回落到环境变量里的口令。这样改密码不用动 Secret，也不会把明文写进代码。
+interface StoredAuth {
+  salt: string;
+  hash: string;
+  at?: number;
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function storedAuth(env: Env): Promise<StoredAuth | null> {
+  if (!env.FW_KV) return null;
+  try {
+    const raw = await env.FW_KV.get('_admin/auth');
+    if (!raw) return null;
+    const d = JSON.parse(raw) as StoredAuth;
+    return d && d.hash && d.salt ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+async function passwordOk(pass: string, env: Env): Promise<boolean> {
+  if (!pass) return false;
+  const stored = await storedAuth(env);
+  if (stored) return safeEqual(await sha256Hex(`${stored.salt}:${pass}`), stored.hash);
+  return safeEqual(pass, env.ADMIN_TOKEN || '');
+}
+
+async function sessionSecret(env: Env): Promise<string> {
+  const stored = await storedAuth(env);
+  return stored ? stored.hash : env.ADMIN_TOKEN || '';
+}
+
 /**
  * 面板鉴权。注意这里与旧版的区别：
  *   旧版 `if (!want) return true` —— 没配口令就等于不设防；
@@ -90,8 +128,6 @@ function bearer(request: Request): string {
  * 用户名也参与校验：Bearer 可以只带口令（脚本用），也可以带 "user:pass"。
  */
 async function adminOk(request: Request, env: Env): Promise<boolean> {
-  const want = env.ADMIN_TOKEN;
-  if (!want) return false; // fail-closed
   const user = env.ADMIN_USER || DEFAULT_ADMIN_USER;
 
   const bt = bearer(request);
@@ -101,18 +137,18 @@ async function adminOk(request: Request, env: Env): Promise<boolean> {
       // "user:pass" 形式
       if (
         (await safeEqual(bt.slice(0, colon), user)) &&
-        (await safeEqual(bt.slice(colon + 1), want))
+        (await passwordOk(bt.slice(colon + 1), env))
       ) {
         return true;
       }
-    } else if (await safeEqual(bt, want)) {
+    } else if (await passwordOk(bt, env)) {
       return true; // 只带口令，脚本用法
     }
   }
 
   const c = cookieToken(request);
   if (c) {
-    const sess = await deriveSession(user, want);
+    const sess = await deriveSession(user, await sessionSecret(env));
     if (await safeEqual(c, sess)) return true;
   }
   return false;
@@ -168,14 +204,14 @@ export default {
       if (!pass) pass = bearer(request);
       if (!uname) uname = user; // 脚本只带口令时按默认用户名算
       const userOk = await safeEqual(uname, user);
-      const passOk = await safeEqual(pass, env.ADMIN_TOKEN);
+      const passOk = await passwordOk(pass, env);
       if (!userOk || !passOk) {
         return new Response(
           loginPage(userOk ? '口令不对，再试一次' : '用户名不对，再试一次', user),
           { status: 401, headers: HTML }
         );
       }
-      const sess = await deriveSession(user, env.ADMIN_TOKEN);
+      const sess = await deriveSession(user, await sessionSecret(env));
       return new Response(null, {
         status: 303,
         headers: { location: '/admin', 'set-cookie': sessionCookie(sess, url) },
@@ -207,6 +243,26 @@ export default {
         return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401, headers: JSONH });
       }
       const sub = url.pathname.slice('/admin/api'.length);
+      if (sub === '/password' && request.method === 'POST') {
+        const body = (await request.json().catch(() => ({}))) as { old?: string; new?: string };
+        const oldPass = String(body.old ?? '');
+        const newPass = String(body.new ?? '');
+        if (!(await passwordOk(oldPass, env))) {
+          return new Response(JSON.stringify({ ok: false, error: 'bad_old' }), { status: 403, headers: JSONH });
+        }
+        if (newPass.length < 8) {
+          return new Response(JSON.stringify({ ok: false, error: 'weak' }), { status: 400, headers: JSONH });
+        }
+        if (!env.FW_KV) {
+          return new Response(JSON.stringify({ ok: false, error: 'no_kv' }), { status: 500, headers: JSONH });
+        }
+        const salt = crypto.randomUUID().replace(/-/g, '');
+        await env.FW_KV.put(
+          '_admin/auth',
+          JSON.stringify({ salt, hash: await sha256Hex(`${salt}:${newPass}`), at: Date.now() })
+        );
+        return new Response(JSON.stringify({ ok: true }), { headers: JSONH });
+      }
       // 面板的密钥管理接口，内部对应 Manager 的 /clientkeys
       const target = sub === '/keys' || sub.startsWith('/keys/') ? '/clientkeys' + sub.slice(5) : sub;
       const stub = env.Manager.get(env.Manager.idFromName(MANAGER_SINGLETON));
